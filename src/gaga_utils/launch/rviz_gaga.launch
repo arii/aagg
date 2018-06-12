@@ -1,0 +1,5 @@
+<launch>
+    <node name="rviz" type="rviz" pkg="gaga" output="screen" 
+        args="--display-config $(find gaga_utils)/configs/rviz_gaga.rviz"/>
+</launch>
+
