@@ -1,26 +1,25 @@
 #!/usr/bin/env python
 
-from geometry_msgs.msg import Pose, PoseStamped, Point, \
-                              Quaternion, PointStamped
-from nav_msgs.msg import Path
-
-from std_msgs.msg import Header
-import numpy as np
-import tf
 import rospy
+import numpy as np
+import time
+import utils
 
+from geometry_msgs.msg import PolygonStamped
+from visualization_msgs.msg import Marker
+from ackermann_msgs.msg import AckermannDriveStamped, AckermannDrive
+from nav_msgs.msg import Odometry
 
-class PurePursuit:
-    path = []
-    path_set = False
-    
-    def __init__(self, tf_listener=None):
-        """ Implements Pure Pursuit trajectory tracking with a fixed lookahead and speed.
-            Modified from Corey Walsh's implementation for the MIT Racecar.
-            Set point determined with the method described here: 
+class PurePursuit(object):
+    """ Implements Pure Pursuit trajectory tracking with a fixed lookahead and speed.
+
+        Set point determined with the method described here: 
             http://www.ri.cmu.edu/pub_files/pub4/howard_thomas_2006_1/howard_thomas_2006_1.pdf
-        """
+        Relies on localization for ground truth vehicle position.
+    """
+    def __init__(self):
         self.trajectory_topic = rospy.get_param("~trajectory_topic")
+        self.odom_topic       = rospy.get_param("~odom_topic")
         self.lookahead        = rospy.get_param("~lookahead")
         self.max_reacquire    = rospy.get_param("~max_reacquire")
         self.speed            = float(rospy.get_param("~speed"))
@@ -28,8 +27,12 @@ class PurePursuit:
         wheelbase_length      = float(rospy.get_param("~wheelbase"))
         self.drive_topic      = rospy.get_param("~drive_topic")
 
+        self.trajectory  = utils.LineTrajectory("/followed_trajectory")
+        self.model       = utils.AckermannModel(wheelbase_length)
         self.do_viz      = True
+        self.odom_timer  = utils.Timer(10)
         self.iters       = 0
+        
         self.nearest_point   = None
         self.lookahead_point = None
 
@@ -39,20 +42,14 @@ class PurePursuit:
         self.lookahead_point_pub = rospy.Publisher(self.viz_namespace + "/lookahead_point", Marker, queue_size = 1)
         
         # topic to send drive commands to
-        self.control_pub = rospy.Publisher(self.drive_topic, PoseStamped, queue_size =1 )
+        self.control_pub = rospy.Publisher(self.drive_topic, AckermannDriveStamped, queue_size =1 )
 
         # topic to listen for trajectories
-        self.traj_sub = rospy.Subscriber(self.trajectory_topic, Path, self.trajectory_callback, queue_size=1)
+        self.traj_sub = rospy.Subscriber(self.trajectory_topic, PolygonStamped, self.trajectory_callback, queue_size=1)
         
         # topic to listen for odometry messages, either from particle filter or the simulator
-        if tf_listener is None:
-            self.tf_listener = tf.TransformListener()
-        else:
-            self.tf_listener = tf_listener
-
-
-        rospy.loginfo("pure pursuit initialized! hello :)")
-
+        self.odom_sub = rospy.Subscriber(self.odom_topic,  Odometry, self.odom_callback, queue_size=1)
+        print "Initialized. Waiting on messages..."
 
     def visualize(self):
         ''' Publishes visualization topics:
@@ -62,8 +59,6 @@ class PurePursuit:
         if not self.do_viz:
             return
         # visualize: pure pursuit circle, lookahead intersection, lookahead radius line, nearest point
-        raise NotImplementedError
-        """
         if self.nearest_point_pub.get_num_connections() > 0 and isinstance(self.nearest_point, np.ndarray):
             self.nearest_point_pub.publish(utils.make_circle_marker(
                 self.nearest_point, 0.5, [0.0,0.0,1.0], "/map", self.viz_namespace, 0, 3))
@@ -71,17 +66,13 @@ class PurePursuit:
         if self.lookahead_point_pub.get_num_connections() > 0 and isinstance(self.lookahead_point, np.ndarray):
             self.lookahead_point_pub.publish(utils.make_circle_marker(
                 self.lookahead_point, 0.5, [1.0,1.0,1.0], "/map", self.viz_namespace, 1, 3))
-        """
 
     def trajectory_callback(self, msg):
         ''' Clears the currently followed trajectory, and loads the new one from the message
         '''
-        msg =  "Receiving new trajectory:" + str( len(msg.polygon.points)) +  "points" 
-        rospy.loginfo(msg)
-        #self.trajectory.clear()
-        self.trajectory = msg.poses
-        #fromPolygon(msg.polygon)
-        #self.trajectory.fromPolygon(msg.polygon)
+        print "Receiving new trajectory:", len(msg.polygon.points), "points" 
+        self.trajectory.clear()
+        self.trajectory.fromPolygon(msg.polygon)
         self.trajectory.publish_viz(duration=0.0)
 
     def odom_callback(self, msg):
@@ -191,4 +182,4 @@ class PurePursuit:
 if __name__=="__main__":
     rospy.init_node("pure_pursuit")
     pf = PurePursuit()
-    r
+    rospy.spin()
