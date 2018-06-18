@@ -9,6 +9,10 @@ import numpy as np
 import tf
 import rospy
 
+from visualization_msgs.msg import Marker, MarkerArray
+from geometry_msgs.msg import Vector3, Point, Pose, PoseStamped, PoseArray, Quaternion, PolygonStamped, Polygon, Point32, PoseWithCovarianceStamped, PointStamped
+from std_msgs.msg import Header, ColorRGBA
+
 
 class PurePursuit:
     path = []
@@ -23,6 +27,7 @@ class PurePursuit:
         self.trajectory_topic = rospy.get_param("~trajectory_topic")
         self.lookahead        = rospy.get_param("~lookahead")
         self.max_reacquire    = rospy.get_param("~max_reacquire")
+        self.root_frame    = rospy.get_param("~root_frame")
         self.speed            = float(rospy.get_param("~speed"))
         self.wrap             = bool(rospy.get_param("~wrap"))
         wheelbase_length      = float(rospy.get_param("~wheelbase"))
@@ -62,16 +67,15 @@ class PurePursuit:
         if not self.do_viz:
             return
         # visualize: pure pursuit circle, lookahead intersection, lookahead radius line, nearest point
-        raise NotImplementedError
-        """
-        if self.nearest_point_pub.get_num_connections() > 0 and isinstance(self.nearest_point, np.ndarray):
-            self.nearest_point_pub.publish(utils.make_circle_marker(
-                self.nearest_point, 0.5, [0.0,0.0,1.0], "/map", self.viz_namespace, 0, 3))
+        if self.nearest_point_pub.get_num_connections() > 0 \
+                and isinstance(self.nearest_point, np.ndarray):
+            self.nearest_point_pub.publish(make_circle_marker(
+                self.nearest_point, 0.5, [0.0,0.0,1.0], self.root_frame, self.viz_namespace, 0, 3))
 
-        if self.lookahead_point_pub.get_num_connections() > 0 and isinstance(self.lookahead_point, np.ndarray):
-            self.lookahead_point_pub.publish(utils.make_circle_marker(
-                self.lookahead_point, 0.5, [1.0,1.0,1.0], "/map", self.viz_namespace, 1, 3))
-        """
+        if self.lookahead_point_pub.get_num_connections() > 0 \
+                and isinstance(self.lookahead_point, np.ndarray):
+            self.lookahead_point_pub.publish(umake_circle_marker(
+                self.lookahead_point, 0.5, [1.0,1.0,1.0], self.root_frame, self.viz_namespace, 1, 3))
 
     def trajectory_callback(self, msg):
         ''' Clears the currently followed trajectory, and loads the new one from the message
@@ -188,7 +192,28 @@ class PurePursuit:
         drive_msg_stamped.drive = drive_msg
         self.control_pub.publish(drive_msg_stamped)
 
+
+def make_circle_marker(point, scale, color, frame_id, namespace, sid, duration=0):
+    marker = Marker()
+    marker.header = make_header(frame_id)
+    marker.ns = namespace
+    marker.id = sid
+    marker.type = 2 # sphere
+    marker.lifetime = rospy.Duration.from_sec(duration)
+    marker.action = 0
+    marker.pose.position.x = point[0]
+    marker.pose.position.y = point[1]
+    marker.pose.orientation.w = 1.0
+    marker.scale.x = scale
+    marker.scale.y = scale
+    marker.scale.z = scale
+    marker.color.r = float(color[0])
+    marker.color.g = float(color[1])
+    marker.color.b = float(color[2])
+    marker.color.a = 1.0
+    return marker
+
+
 if __name__=="__main__":
     rospy.init_node("pure_pursuit")
     pf = PurePursuit()
-    r
