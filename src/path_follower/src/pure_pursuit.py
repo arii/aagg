@@ -12,6 +12,8 @@ import rospy
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Vector3, Point, Pose, PoseStamped, PoseArray, Quaternion, PolygonStamped, Polygon, Point32, PoseWithCovarianceStamped, PointStamped
 from std_msgs.msg import Header, ColorRGBA
+from robot_mechanism_controllers import JTCartesianControllerState\
+        as ControllerState
 
 
 class PurePursuit:
@@ -31,12 +33,14 @@ class PurePursuit:
         self.speed            = float(rospy.get_param("~speed"))
         self.wrap             = bool(rospy.get_param("~wrap"))
         wheelbase_length      = float(rospy.get_param("~wheelbase"))
-        self.drive_topic      = rospy.get_param("~drive_topic")
+        self.controller_namespace   = rospy.get_param("~l_cart")
 
         self.do_viz      = True
         self.iters       = 0
         self.nearest_point   = None
         self.lookahead_point = None
+        self.controller_state = None
+        self.controller_state_timer = Timer(10)
 
         # set up the visualization topic to show the nearest point on the trajectory, and the lookahead point
         self.viz_namespace = "/pure_pursuit"
@@ -50,13 +54,19 @@ class PurePursuit:
         self.traj_sub = rospy.Subscriber(self.trajectory_topic, Path, self.trajectory_callback, queue_size=1)
         
         # topic to listen for odometry messages, either from particle filter or the simulator
-        if tf_listener is None:
-            self.tf_listener = tf.TransformListener()
-        else:
-            self.tf_listener = tf_listener
+        self.control_state_sub = rospy.Subscriber(self.controller_namespace+"/state", ControllerState, self.controller_state_callback, queue_size=1)
 
 
         rospy.loginfo("pure pursuit initialized! hello :)")
+
+    def controller_state_callback(self, msg):
+        self.controller_state = msg
+        self.pure_pursuit(msg.x.pose)
+        # this is for timing info
+        self.controller_state_timer.tick()
+        self.iters += 1
+        if self.iters % 20 == 0:
+            rospy.loginfo("Control fps:", self.controller_state_timer.fps())
 
 
     def visualize(self):
@@ -80,25 +90,27 @@ class PurePursuit:
     def trajectory_callback(self, msg):
         ''' Clears the currently followed trajectory, and loads the new one from the message
         '''
-        msg =  "Receiving new trajectory:" + str( len(msg.polygon.points)) +  "points" 
+        msg =  "Receiving new trajectory:" + str( len(msg.poses)) +  "points" 
         rospy.loginfo(msg)
+        traj = []
+        for pose in msg.poses:
+            pos = pose.position
+            quat = pose.quaternion
+            pt = [pos.x, pos.y, pos.z, quat.w, quat.x, quat.y, quat.z]
+            traj.append( np.array(traj))
+        self.trajectory = np.array(traj)
+        
         #self.trajectory.clear()
-        self.trajectory = msg.poses
         #fromPolygon(msg.polygon)
         #self.trajectory.fromPolygon(msg.polygon)
-        self.trajectory.publish_viz(duration=0.0)
+        #self.trajectory.publish_viz(duration=0.0)
 
-    def odom_callback(self, msg):
-        ''' Extracts robot state information from the message, and executes pure pursuit control.
-        '''
-        pose = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y, utils.quaternion_to_angle(msg.pose.pose.orientation)])
-        self.pure_pursuit(pose)
-        
-        # this is for timing info
-        self.odom_timer.tick()
-        self.iters += 1
-        if self.iters % 20 == 0:
-            print "Control fps:", self.odom_timer.fps()
+    def nearest_point_on_trajectory(self, point):
+        ''' return the closet point based on cartesian distance only'''
+
+        dist = self.traj[:,(0,1,2)] - point
+        dist_i = np.argmin(dist)
+        return self.traj[dist_i]
 
     def pure_pursuit(self, pose):
         ''' Determines and applies Pure Pursuit control law
@@ -191,8 +203,6 @@ class PurePursuit:
         drive_msg.steering_angle_velocity = 0
         drive_msg_stamped.drive = drive_msg
         self.control_pub.publish(drive_msg_stamped)
-
-
 def make_circle_marker(point, scale, color, frame_id, namespace, sid, duration=0):
     marker = Marker()
     marker.header = make_header(frame_id)
@@ -213,7 +223,37 @@ def make_circle_marker(point, scale, color, frame_id, namespace, sid, duration=0
     marker.color.a = 1.0
     return marker
 
+class CircularArray(object):
+    """docstring for CircularArray"""
+    def __init__(self, size):
+        self.arr = np.zeros(size)
+        self.ind = 0
+        self.num_els = 0
 
+    def append(self, value):
+        if self.num_els < self.arr.shape[0]:
+            self.num_els += 1
+        self.arr[self.ind] = value
+        self.ind = (self.ind + 1) % self.arr.shape[0]
+
+    def mean(self):
+        return np.mean(self.arr[:self.num_els])
+
+    def median(self):
+        return np.median(self.arr[:self.num_els])
+
+class Timer:
+    def __init__(self, smoothing):
+        self.arr = CircularArray(smoothing)
+        self.last_time = time.time()
+
+    def tick(self):
+        t = time.time()
+        self.arr.append(1.0 / (t - self.last_time))
+        self.last_time = t
+
+    def fps(self):
+        return self.arr.mean()
 if __name__=="__main__":
     rospy.init_node("pure_pursuit")
     pf = PurePursuit()
