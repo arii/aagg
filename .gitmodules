@@ -2,5 +2,5 @@
 	path = src/pr2_mechanism
 	url = git@github.mit.edu:goretkin/pr2_mechanism.git
 [submodule "src/force_feedback_controller"]
-	path = src/force_feedback_controller
+	path = src/my_controller_pkg
 	url = git@github.mit.edu:goretkin/force_feedback_controller.git
