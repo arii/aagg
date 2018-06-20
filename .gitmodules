@@ -1,0 +1,6 @@
+[submodule "src/pr2_mechanism"]
+	path = src/pr2_mechanism
+	url = git@github.mit.edu:goretkin/pr2_mechanism.git
+[submodule "src/force_feedback_controller"]
+	path = src/force_feedback_controller
+	url = git@github.mit.edu:goretkin/force_feedback_controller.git
