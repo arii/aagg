@@ -10,6 +10,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   std_msgs
   nav_msgs
+  robot_mechanism_controllers
 )
 
 ## System dependencies are found with CMake's conventions

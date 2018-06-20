@@ -23,7 +23,7 @@ class PathGenerator:
                         self.updateOrigin)
         self.origin_updated = False
         self.origin = Point(0.9, -0.18, 0.23) #XXX todo : make this current pose
-        self.quat = Quaternion(1,0,0,0)
+        self.quat = Quaternion(0,0,0,1)
 
         if tf_listener is None:
             self.tf_listener = tf.TransformListener()
@@ -77,7 +77,7 @@ class PathGenerator:
 
 if __name__=="__main__":
     rospy.init_node("path_generator")
-    arm = 'r'
+    arm = 'l'
     root_frame = 'torso_lift_link'
     tool_frame = '%s_gripper_tool_frame' % arm
     pos = (.9, -0.18, 0.23)

@@ -12,7 +12,7 @@ import rospy
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Vector3, Point, Pose, PoseStamped, PoseArray, Quaternion, PolygonStamped, Polygon, Point32, PoseWithCovarianceStamped, PointStamped
 from std_msgs.msg import Header, ColorRGBA
-from robot_mechanism_controllers import JTCartesianControllerState\
+from robot_mechanism_controllers.msg import JTCartesianControllerState \
         as ControllerState
 
 
@@ -26,14 +26,14 @@ class PurePursuit:
             Set point determined with the method described here: 
             http://www.ri.cmu.edu/pub_files/pub4/howard_thomas_2006_1/howard_thomas_2006_1.pdf
         """
-        self.trajectory_topic = rospy.get_param("~trajectory_topic")
-        self.lookahead        = rospy.get_param("~lookahead")
-        self.max_reacquire    = rospy.get_param("~max_reacquire")
-        self.root_frame    = rospy.get_param("~root_frame")
-        self.speed            = float(rospy.get_param("~speed"))
-        self.wrap             = bool(rospy.get_param("~wrap"))
-        wheelbase_length      = float(rospy.get_param("~wheelbase"))
-        self.controller_namespace   = rospy.get_param("~l_cart")
+        self.trajectory_topic = rospy.get_param("~trajectory_topic", "path_generated")
+        self.lookahead        = float(rospy.get_param("~lookahead", ".01"))
+        self.max_reacquire    = rospy.get_param("~max_reacquire", "1.0")
+        self.root_frame    = rospy.get_param("~root_frame", "torso_lift_link")
+        self.speed            = float(rospy.get_param("~speed", "0.1"))
+        self.wrap             = bool(rospy.get_param("~wrap", "True"))
+        wheelbase_length      = float(rospy.get_param("~wheelbase", "1.0"))
+        self.controller_namespace   = rospy.get_param("~controller", "l_cart")
 
         self.do_viz      = True
         self.iters       = 0
@@ -41,6 +41,7 @@ class PurePursuit:
         self.lookahead_point = None
         self.controller_state = None
         self.controller_state_timer = Timer(10)
+        self.trajectory = None
 
         # set up the visualization topic to show the nearest point on the trajectory, and the lookahead point
         self.viz_namespace = "/pure_pursuit"
@@ -48,7 +49,8 @@ class PurePursuit:
         self.lookahead_point_pub = rospy.Publisher(self.viz_namespace + "/lookahead_point", Marker, queue_size = 1)
         
         # topic to send drive commands to
-        self.control_pub = rospy.Publisher(self.drive_topic, PoseStamped, queue_size =1 )
+        self.control_pub = rospy.Publisher(self.controller_namespace + "/command_pose", PoseStamped, queue_size =1 )
+        #self.control_pub = rospy.Publisher(self.drive_topic, PoseStamped, queue_size =1 )
 
         # topic to listen for trajectories
         self.traj_sub = rospy.Subscriber(self.trajectory_topic, Path, self.trajectory_callback, queue_size=1)
@@ -61,12 +63,15 @@ class PurePursuit:
 
     def controller_state_callback(self, msg):
         self.controller_state = msg
-        self.pure_pursuit(msg.x.pose)
+        pos = msg.x.pose.position
+        quat = msg.x.pose.orientation
+        pt = [pos.x, pos.y, pos.z, quat.w, quat.x, quat.y, quat.z]
+        self.pure_pursuit( np.array(pt))
         # this is for timing info
         self.controller_state_timer.tick()
         self.iters += 1
         if self.iters % 20 == 0:
-            rospy.loginfo("Control fps:", self.controller_state_timer.fps())
+            pass #rospy.loginfo("Control fps: %.2f"% self.controller_state_timer.fps())
 
 
     def visualize(self):
@@ -80,24 +85,24 @@ class PurePursuit:
         if self.nearest_point_pub.get_num_connections() > 0 \
                 and isinstance(self.nearest_point, np.ndarray):
             self.nearest_point_pub.publish(make_circle_marker(
-                self.nearest_point, 0.5, [0.0,0.0,1.0], self.root_frame, self.viz_namespace, 0, 3))
+                self.nearest_point, 0.1, [0.0,0.0,1.0], self.root_frame, self.viz_namespace, 0, 3))
 
         if self.lookahead_point_pub.get_num_connections() > 0 \
                 and isinstance(self.lookahead_point, np.ndarray):
             self.lookahead_point_pub.publish(umake_circle_marker(
-                self.lookahead_point, 0.5, [1.0,1.0,1.0], self.root_frame, self.viz_namespace, 1, 3))
+                self.lookahead_point, 0.1, [1.0,1.0,1.0], self.root_frame, self.viz_namespace, 1, 3))
 
     def trajectory_callback(self, msg):
         ''' Clears the currently followed trajectory, and loads the new one from the message
         '''
-        msg =  "Receiving new trajectory:" + str( len(msg.poses)) +  "points" 
-        rospy.loginfo(msg)
+        msginfo =  "Receiving new trajectory:" + str( len(msg.poses)) +  "points" 
+        rospy.loginfo(msginfo)
         traj = []
         for pose in msg.poses:
-            pos = pose.position
-            quat = pose.quaternion
+            pos = pose.pose.position
+            quat = pose.pose.orientation
             pt = [pos.x, pos.y, pos.z, quat.w, quat.x, quat.y, quat.z]
-            traj.append( np.array(traj))
+            traj.append(pt)
         self.trajectory = np.array(traj)
         
         #self.trajectory.clear()
@@ -107,10 +112,9 @@ class PurePursuit:
 
     def nearest_point_on_trajectory(self, point):
         ''' return the closet point based on cartesian distance only'''
-
-        dist = self.traj[:,(0,1,2)] - point
+        dist = np.linalg.norm(self.trajectory[:,(0,1,2)] - point, axis=1)
         dist_i = np.argmin(dist)
-        return self.traj[dist_i]
+        return self.trajectory[dist_i], dist_i
 
     def pure_pursuit(self, pose):
         ''' Determines and applies Pure Pursuit control law
@@ -127,17 +131,23 @@ class PurePursuit:
                 - If nearest_point is less than the lookahead distance, find the lookahead point as normal
         '''
         # stop if no trajectory has been received
-        if self.trajectory.empty():
+        if self.trajectory is None:
             return self.stop()
-
         # this instructs the trajectory to convert the list of waypoints into a numpy matrix
-        if self.trajectory.dirty():
-            self.trajectory.make_np_array()
+        #if self.trajectory.dirty():
+        #    self.trajectory.make_np_array()
 
         # step 1
-        nearest_point, nearest_dist, t, i = utils.nearest_point_on_trajectory(pose[:2], self.trajectory.np_points)
-        self.nearest_point = nearest_point
+        #nearest_point, nearest_dist, t, i = utils.nearest_point_on_trajectory(pose[:2], self.trajectory.np_points)
+        self.nearest_point, nearest_idx  = self.nearest_point_on_trajectory(pose[:3])
+        self.lookahead = self.trajectory[ (nearest_idx +5 )% len(self.trajectory)]
+        pose =PoseStamped(make_header(self.root_frame),  Pose(Point(*self.lookahead[:3]), Quaternion(*self.lookahead[3:])))
+        self.control_pub.publish(pose)
 
+        
+
+        
+        """
         if nearest_dist < self.lookahead:
             # step 2
             lookahead_point, i2, t2 = \
@@ -156,7 +166,6 @@ class PurePursuit:
             self.lookahead_point = self.nearest_point
         else:
             self.lookahead_point = None
-
         # stop of there is no navigation target, otherwise use ackermann geometry to navigate there
         if not isinstance(self.lookahead_point, np.ndarray):
             self.stop()
@@ -165,8 +174,9 @@ class PurePursuit:
             # send the control commands
             self.apply_control(self.speed, steering_angle)
 
+        """
         self.visualize()
-
+    """
     def determine_steering_angle(self, pose, lookahead_point):
         ''' Given a robot pose, and a lookahead point, determine the open loop control 
             necessary to navigate to that lookahead point. Uses Ackermann steering geometry.
@@ -191,8 +201,10 @@ class PurePursuit:
         drive_msg.steering_angle_velocity = 0
         drive_msg_stamped.drive = drive_msg
         self.control_pub.publish(drive_msg_stamped)
-
+    """    
     def stop(self):
+        #rospy.loginfo("stop not implemented")
+        return
         print "Stopping"
         drive_msg_stamped = AckermannDriveStamped()
         drive_msg = AckermannDrive()
@@ -203,24 +215,58 @@ class PurePursuit:
         drive_msg.steering_angle_velocity = 0
         drive_msg_stamped.drive = drive_msg
         self.control_pub.publish(drive_msg_stamped)
+
+def make_header(frame_id):
+        return Header(0, rospy.Time(0), frame_id)
+
+def make_arrow_marker(point, scale, color, frame_id, namespace, sid, duration=0):
+    marker = Marker()
+    marker.header = make_header(frame_id)
+    marker.ns = namespace
+    marker.id = sid
+    marker.type = 0
+    marker.lifetime = rospy.Duration.from_sec(duration)
+    marker.action = 0
+    marker.pose.position.x = point[0]
+    marker.pose.position.y = point[1]
+    marker.pose.position.z = point[2]
+    marker.pose.orientation.w = point[3]
+    marker.pose.orientation.x = point[4]
+    marker.pose.orientation.y = point[5]
+    marker.pose.orientation.z = point[6]
+    marker.scale.x = scale
+    marker.scale.y = .1*scale
+    marker.scale.z = .1*scale
+    marker.color.r = float(color[0])
+    marker.color.g = float(color[1])
+    marker.color.b = float(color[2])
+    marker.color.a = .5
+    return marker
+
+
+
 def make_circle_marker(point, scale, color, frame_id, namespace, sid, duration=0):
     marker = Marker()
     marker.header = make_header(frame_id)
     marker.ns = namespace
     marker.id = sid
-    marker.type = 2 # sphere
+    marker.type = 2
     marker.lifetime = rospy.Duration.from_sec(duration)
     marker.action = 0
     marker.pose.position.x = point[0]
     marker.pose.position.y = point[1]
-    marker.pose.orientation.w = 1.0
+    marker.pose.position.z = point[2]
+    marker.pose.orientation.w = point[3]
+    marker.pose.orientation.x = point[4]
+    marker.pose.orientation.y = point[5]
+    marker.pose.orientation.z = point[6]
     marker.scale.x = scale
     marker.scale.y = scale
     marker.scale.z = scale
     marker.color.r = float(color[0])
     marker.color.g = float(color[1])
     marker.color.b = float(color[2])
-    marker.color.a = 1.0
+    marker.color.a = .5
     return marker
 
 class CircularArray(object):
@@ -245,15 +291,19 @@ class CircularArray(object):
 class Timer:
     def __init__(self, smoothing):
         self.arr = CircularArray(smoothing)
-        self.last_time = time.time()
+        self.last_time = rospy.Time.now().to_sec()
 
     def tick(self):
-        t = time.time()
+        t = rospy.Time.now().to_sec()
+        if (t - self.last_time) == 0:
+            return
         self.arr.append(1.0 / (t - self.last_time))
         self.last_time = t
 
     def fps(self):
+
         return self.arr.mean()
 if __name__=="__main__":
     rospy.init_node("pure_pursuit")
     pf = PurePursuit()
+    rospy.spin()
