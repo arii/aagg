@@ -109,6 +109,9 @@ class PurePursuit:
         #fromPolygon(msg.polygon)
         #self.trajectory.fromPolygon(msg.polygon)
         #self.trajectory.publish_viz(duration=0.0)
+    def pt_to_line_segment_distance(self, pt, p1, p2):
+        # returns normal vector and distance
+        return
 
     def nearest_point_on_trajectory(self, point):
         ''' return the closet point based on cartesian distance only'''
@@ -303,6 +306,68 @@ class Timer:
     def fps(self):
 
         return self.arr.mean()
+
+
+def in_range(x1, x2, x0):
+    if x1 < x2:
+        a = x1
+        b = x2
+    else:
+        a = x2
+        b = x1
+    left = np.round(x0 - a,5)
+    right = np.round(b-x0, 5)
+    return left >= 0 and right >= 0
+
+def pt_in_segment(p1, p2, pt):
+    valid =  True
+    for i in range(3):
+        valid &= in_range(p1[i], p2[i], pt[i])
+    return valid
+
+"""      
+def dist_line_pt(p1, p2, pt):
+    x0,y0 = pt
+    x1,y1 = p1
+    x2,y2 = p2
+
+    num =abs((y2 - y1)*x0 - (x2-x1)*y0 + x2*y1 - y2*x1)
+    den =( (y2-y1)**2 + (x2-x1)**2)** 0.5
+    if den != 0:
+        d = num/den
+    else:
+        d = ( (x0 - x1)**2 + (y0-y1)**2 )**0.5
+
+    # make sure pt is on line segment
+    n_l = [-(y2-y1), (x2-x1)]
+    n_r = [(y2-y1), -(x2-x1)]
+    valids = []
+    for n in [n_l, n_r]:
+        n_hat = MU.unit(n)
+        x_i = x0 + n_hat[0]*abs(d)
+        y_i = y0 + n_hat[1]*abs(d)
+        p_i = (x_i, y_i)
+
+        valids.append(pt_in_segment(p1, p2, p_i) )# (in_range(x1, x2, x_i) and in_range(y1, y2, y_i))
+
+    if not any(valids): 
+        d1 = MU.norm(pt, p1)
+        d2 = MU.norm(pt, p2)
+        d  = d1 if d1 <= d2 else d2
+    #print '\t', p1,p2,pt,
+    #print "\t %s" % any(valids), d
+    return d
+
+
+def dist_line_segs((a1,a2), (b1,b2) ):
+    dists = []
+    dists.append(dist_line_pt (a1, a2, b1))
+    dists.append(dist_line_pt (a1, a2, b2))
+    dists.append(dist_line_pt (b1, b2, a1))
+    dists.append(dist_line_pt (b1, b2, a2))
+    return min(dists)
+"""
+
 if __name__=="__main__":
     rospy.init_node("pure_pursuit")
     pf = PurePursuit()
