@@ -12,9 +12,10 @@ interactive="shopt -q login_shell && echo 'Login shell' || echo 'Not login shell
 source ~/.bashrc
 
 #tmux new -d -s pr2mux 'echo "roscore"; $interactive; roscore; bash' \; \
-tmux new -d -s pr2mux 'echo "roscore"; rviz; bash' \; \
-    new-window -d -n openni 'echo "openni"; sleep 2; roslaunch openni_launch openni.launch rgb_frame_id:=base_link'\; \
-    new-window -d -n sidebyside 'echo "side"; sleep 4; rosrun recording_stuff side_by_side.py '\; \
-	new-window -d  -n robot_dash 'echo "dashboard"; sleep 2; rosrun rqt_pr2_dashboard rqt_pr2_dashboard; bash' \; \
+tmux new -d -s pr2mux 'echo "roscore"; roscore; bash' \; \
+    new-window -d -n sim 'echo "sim"; sleep 2; roslaunch gaga_utils sim_gaga.launch'\; \
+    new-window -d -n rviz 'echo "rviz"; sleep 30; roslaunch gaga_utils rviz_gaga.launch'\; \
+    new-window -d -n rviz 'echo "rviz"; sleep 35; roslaunch path_follower jt_default_controller.launch'\; \
+	new-window -d  -n robot_dash 'echo "dashboard"; sleep 30; rosrun rqt_pr2_dashboard rqt_pr2_dashboard; bash' \; \
 		attach \;
 
