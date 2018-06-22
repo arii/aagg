@@ -109,9 +109,103 @@ class PurePursuit:
         #fromPolygon(msg.polygon)
         #self.trajectory.fromPolygon(msg.polygon)
         #self.trajectory.publish_viz(duration=0.0)
+
     def pt_to_line_segment_distance(self, pt, p1, p2):
-        # returns normal vector and distance
-        return
+        ''' returns normal vector and distance
+        pt, p1, and p2 are 3x1 vectors
+        '''
+        # the line is defined as p1 + t*(p2-p1)
+        # line = p1 + v*t where v = p2-p1
+        v = p2 - p1
+        
+        # let u be the vector from pt to p1 
+        u = p1 - pt
+        
+        # the normal vector from the line towards pt is
+        # n = u x v
+        n = np.cross(u, v)
+        n_mag = np.linalg.norm(n)
+
+        if n_mag == 0:
+            # the pt is on the line.
+            # don't normalize n
+            nhat = n
+        else:
+            nhat = n/np.linalg.norm(n)
+        
+        # perp distance is the dot product between the normal
+        # and the vector from pt to p1
+        signed_perp_distance = np.dot(nhat, u)
+
+        # project the point onto the line 
+        pt_proj = pt + signed_perp_distance*u
+
+        if pt_in_segment(p1, p2, pt_proj):
+            # if the projected point is on the line segment
+            # then the distance is  the perpindicular distance
+            dist = abs(signed_perp_distance)
+
+        else: 
+            # if the point is not on the line segment then the distance is
+            # the minimum distance to the end points.
+            d1 = np.linalg.norm(u)
+
+            #vector from pt to p2
+            w = p2 - pt
+            d2 = np.linalg.norm(w)
+
+            # update normal vector to point toward the end points
+            if d1 < d2:
+                n = u 
+                dist = d1
+            else:
+                n = w
+                dist = d2
+            # this should never happen n_mag == 0:
+            n_mag = np.linalg.norm(n)
+            nhat = n/n_mag
+        return dist, nhat, pt_proj
+
+    def nearest_point_on_trajectory(self, point):
+        dists = []
+        for i in range(len(self.trajectory)):
+            p1 = self.trajectory[i-1, (0,1,2)]
+            p2 = self.trajectory[i, (0,1,2)]
+            d, n, pt = self.pt_to_line_segment_distance(point, p1, p2)
+            dists.append(d,n,pt,i)
+        nearest = min(dists, key=lambda x: x[0])
+        d, n, nearest_pt, i = nearest
+
+        # ignore earlier segments
+        dists = dists[i:]
+        lookahead_points = []
+        for (d, n, pt, i) in  dists:
+
+            if d == self.lookahead:
+                # lookahead point is tangent to the circle
+                # we have already computed this point
+                lookahead_pt = pt
+                dist_from_traj = 0
+
+            elif d < self.lookahead:
+                cos th = d/lookahead
+
+
+                # find the two points that intersect the circle and line
+                pass
+                # are the two points 
+                dist_from_traj = 0
+            else:
+                # project lookahead distance from point along the normal
+                lookahead_pt = point + self.lookahead*n
+                dist_from_traj = abs(d - self.lookahead)
+
+            lookahead_points.append((dist_from_traj, lookahead_pt))
+        dist_from_traj, lookahead_pt = min(lookahead_points, key = lambda x:x[0])
+    return lookahead_pt
+
+
+
 
     def nearest_point_on_trajectory(self, point):
         ''' return the closet point based on cartesian distance only'''
