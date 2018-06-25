@@ -59,7 +59,7 @@ class PathGenerator:
         quat = self.quat
         header = self.get_header()
         
-        disc = 50
+        disc = 6
         path = Path()
         path.header = header
 
@@ -67,7 +67,7 @@ class PathGenerator:
             th = 2*np.pi*float(i)/disc
             x = r*np.cos(th) + origin.x
             y = r*np.sin(th) + origin.y
-            z = origin.z
+            z = origin.z + r*(float(i)/disc)
             pos = Point(x,y,z)
             ps = PoseStamped(header, Pose(pos, quat))
             path.poses.append(ps)
@@ -77,14 +77,17 @@ class PathGenerator:
 
 if __name__=="__main__":
     rospy.init_node("path_generator")
-    arm = 'l'
+    arm = 'r'
     root_frame = 'torso_lift_link'
     tool_frame = '%s_gripper_tool_frame' % arm
     pos = (.9, -0.18, 0.23)
 
     pg = PathGenerator(arm, root_frame, tool_frame)
     rospy.sleep(.5)
-    pg.circle(.1)
+    
+    while True:
+        pg.circle(.1)
+        rospy.sleep(1)
     rospy.spin()
 
 """
