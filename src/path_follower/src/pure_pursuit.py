@@ -27,7 +27,7 @@ class PurePursuit:
             http://www.ri.cmu.edu/pub_files/pub4/howard_thomas_2006_1/howard_thomas_2006_1.pdf
         """
         self.trajectory_topic = rospy.get_param("~trajectory_topic", "path_generated")
-        self.lookahead        = float(rospy.get_param("~lookahead", ".05"))
+        self.lookahead        = float(rospy.get_param("~lookahead", ".005"))
         self.max_reacquire    = rospy.get_param("~max_reacquire", "1.0")
         self.root_frame    = rospy.get_param("~root_frame", "torso_lift_link")
         self.speed            = float(rospy.get_param("~speed", "0.1"))
@@ -86,12 +86,14 @@ class PurePursuit:
         if self.nearest_point_pub.get_num_connections() > 0 \
                 and isinstance(self.nearest_point, np.ndarray):
             self.nearest_point_pub.publish(make_circle_marker(
-                self.nearest_point, self.lookahead*2, [0.0,0.0,1.0], self.root_frame, self.viz_namespace, 0, 3, .25))
+                self.nearest_point, 0.005, [0.1,0.3,1.0], self.root_frame, self.viz_namespace+"nearestontraj", 0, 3, .25))
+            self.nearest_point_pub.publish(make_circle_marker(
+                self.pose, self.lookahead*2, [0.0,0.0,1.0], self.root_frame, self.viz_namespace+"currentpose", 0, 3, .25))
 
         if self.lookahead_point_pub.get_num_connections() > 0 \
                 and isinstance(self.lookahead_point, np.ndarray):
             self.lookahead_point_pub.publish(make_circle_marker(
-                self.lookahead_point, 0.01, [1.0,1.0,1.0], self.root_frame, self.viz_namespace, 1, 3))
+                self.lookahead_point, 0.005, [1.0,1.0,1.0], self.root_frame, self.viz_namespace, 1, 3))
 
     def trajectory_callback(self, msg):
         ''' Clears the currently followed trajectory, and loads the new one from the message
@@ -106,6 +108,9 @@ class PurePursuit:
             traj.append(pt)
         self.trajectory = np.array(traj)
         
+        #self.control_pub.publish(msg.poses[0])
+        #self.control_pub.publish(pose)
+
         #self.trajectory.clear()
         #fromPolygon(msg.polygon)
         #self.trajectory.fromPolygon(msg.polygon)
@@ -147,6 +152,7 @@ class PurePursuit:
 
         # project the point onto the line 
         pt_proj = pt + abs(signed_perp_distance)*uhat
+        dist = abs(signed_perp_distance)
 
         if pt_in_segment(p1, p2, pt_proj):
             # if the projected point is on the line segment
@@ -184,15 +190,15 @@ class PurePursuit:
             dists.append((d,n,pt,v,i))
             
             pose = np.array(pt.tolist() + self.trajectory[i,3:].tolist()) 
-            self.lookahead_point_pub.publish(make_circle_marker(
-                pose, 0.01, [1.0,0.0,.0], self.root_frame, self.viz_namespace+"baa" + str(i), 1, 3))
+            #self.lookahead_point_pub.publish(make_circle_marker(
+            #    pose, 0.001, [1.0,0.0,.0], self.root_frame, self.viz_namespace+"baa" + str(i), 1, 3))
 
 
         nearest = min(dists, key=lambda x: x[0])
-        d, n, nearest_pt, v, i = nearest
+        d, n, nearest_pt, v, nearest_i = nearest
 
         # ignore earlier segments
-        dists = dists[i:]
+        dists = dists[nearest_i:]
         lookahead_points = []
         for (d, n, pt, v, j) in  dists:
 
@@ -243,8 +249,8 @@ class PurePursuit:
         for j, traj in enumerate(self.trajectory[i:]):
             pose = lookahead_points[j][2].tolist() + traj[3:].tolist()
             
-            self.lookahead_point_pub.publish(make_circle_marker(
-                pose, 0.01, [1.0,1.0,1.0], self.root_frame, self.viz_namespace+"aa" + str(j), 1, 3))
+            #self.lookahead_point_pub.publish(make_circle_marker(
+            #    pose, 0.001, [0.0,1.0,1.0], self.root_frame, self.viz_namespace+"aa" + str(j), 1, 3))
 
         return nearest_pt, lookahead_pt
 
@@ -282,11 +288,13 @@ class PurePursuit:
         #nearest_point, nearest_dist, t, i = utils.nearest_point_on_trajectory(pose[:2], self.trajectory.np_points)
         #self.nearest_point, nearest_idx  = self.nearest_point_on_trajectory(pose[:3])
         #self.lookahead_point = self.trajectory[ (nearest_idx +5 )% len(self.trajectory)]
+        self.pose = pose
 
         self.nearest_point, self.lookahead_point = self.lookahead_point_on_trajectory(pose[:3])
 
         pose =PoseStamped(make_header(self.root_frame),  Pose(Point(*self.lookahead_point[:3]), Quaternion(*self.lookahead_point[3:])))
-        #self.control_pub.publish(pose)
+        if (self.iters %100) == 0:
+            self.control_pub.publish(pose)
 
         
 
@@ -461,6 +469,8 @@ def in_range(x1, x2, x0):
     return left >= 0 and right >= 0
 
 def pt_in_segment(p1, p2, pt):
+    return np.all(pt > p1) and np.all(pt <p2) or\
+            np.all(pt > p2) and np.all(pt <p1)
     valid =  True
     for i in range(3):
         valid &= in_range(p1[i], p2[i], pt[i])

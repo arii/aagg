@@ -9,7 +9,7 @@ import numpy as np
 import tf
 import rospy
 pos = (.9, -0.18, 0.23)
-quat = (1, 0, 0, 0)
+quat = Quaternion(0, 0, 0, 1)
 
 class PathGenerator:
     def __init__(self, arm, root_frame, tool_frame, tf_listener=None):
@@ -23,7 +23,7 @@ class PathGenerator:
                         self.updateOrigin)
         self.origin_updated = False
         self.origin = Point(0.9, -0.18, 0.23) #XXX todo : make this current pose
-        self.quat = Quaternion(0,0,0,1)
+        self.quat =quat # Quaternion(0,0,0,1)
 
         if tf_listener is None:
             self.tf_listener = tf.TransformListener()
@@ -59,12 +59,12 @@ class PathGenerator:
         quat = self.quat
         header = self.get_header()
         
-        disc = 6
+        disc = 4
         path = Path()
         path.header = header
 
         for i in range(disc):
-            th = 2*np.pi*float(i)/disc
+            th =4*2*np.pi*float(i)/disc
             x = r*np.cos(th) + origin.x
             y = r*np.sin(th) + origin.y
             z = origin.z + r*(float(i)/disc)
