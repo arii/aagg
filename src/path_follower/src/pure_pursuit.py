@@ -27,7 +27,7 @@ class PurePursuit:
             http://www.ri.cmu.edu/pub_files/pub4/howard_thomas_2006_1/howard_thomas_2006_1.pdf
         """
         self.trajectory_topic = rospy.get_param("~trajectory_topic", "path_generated")
-        self.lookahead        = float(rospy.get_param("~lookahead", ".005"))
+        self.lookahead        = float(rospy.get_param("~lookahead", ".015"))
         self.max_reacquire    = rospy.get_param("~max_reacquire", "1.0")
         self.root_frame    = rospy.get_param("~root_frame", "torso_lift_link")
         self.speed            = float(rospy.get_param("~speed", "0.1"))
@@ -66,13 +66,13 @@ class PurePursuit:
         self.controller_state = msg
         pos = msg.x.pose.position
         quat = msg.x.pose.orientation
-        pt = [pos.x, pos.y, pos.z, quat.w, quat.x, quat.y, quat.z]
-        self.pure_pursuit( np.array(pt))
+        pt = [pos.x, pos.y, pos.z, quat.x, quat.y, quat.z, quat.w]
+        self.pose = np.array(pt)
+        self.pure_pursuit( self.pose)
         # this is for timing info
         self.controller_state_timer.tick()
-        self.iters += 1
-        if self.iters % 20 == 0:
-            pass #rospy.loginfo("Control fps: %.2f"% self.controller_state_timer.fps())
+        if self.trajectory is not None and self.iters % 20 == 0:
+            rospy.loginfo("Control fps: %.2f"% self.controller_state_timer.fps())
 
 
     def visualize(self):
@@ -100,86 +100,74 @@ class PurePursuit:
         '''
         msginfo =  "Receiving new trajectory:" + str( len(msg.poses)) +  "points" 
         rospy.loginfo(msginfo)
-        traj = []
+        self.trajectory = None
+        rospy.loginfo("HACK! waiting to go to start of traj.")
+        rospy.sleep(1)
+        traj = [self.pose]
         for pose in msg.poses:
             pos = pose.pose.position
             quat = pose.pose.orientation
-            pt = [pos.x, pos.y, pos.z, quat.w, quat.x, quat.y, quat.z]
+            pt = [pos.x, pos.y, pos.z, quat.x, quat.y, quat.z, quat.w]
             traj.append(pt)
         self.trajectory = np.array(traj)
         
-        #self.control_pub.publish(msg.poses[0])
-        #self.control_pub.publish(pose)
-
-        #self.trajectory.clear()
-        #fromPolygon(msg.polygon)
-        #self.trajectory.fromPolygon(msg.polygon)
-        #self.trajectory.publish_viz(duration=0.0)
-
-    def pt_to_line_segment_distance(self, pt, p1, p2):
+    def pt_to_line_segment_distance(self, pt, p1, p2, onpath=False):
         ''' returns normal vector and distance
         pt, p1, and p2 are 3x1 vectors
         '''
         # the line is defined as p1 + t*(p2-p1)
         # line = p1 + v*t where v = p2-p1
+
+        # vector representing line 
         v = p2 - p1
-        
-        # let u be the vector from pt to p1 
+
+        # vector from pt to p1
         u = p1 - pt
+
+        u_mag = np.linalg.norm(u)
+        v_mag = np.linalg.norm(v)
         
-        # the normal vector from the line towards pt is
-        # n = u x v
-        n = np.cross(u, v)
+        vhat = v if v_mag == 0 else v/v_mag
+        uhat = u if u_mag == 0 else u/u_mag      
+
+        
+        # perp vector
+        n = u - np.dot(u, vhat)*vhat
+
         n_mag = np.linalg.norm(n)
 
-        if n_mag == 0:
-            # the pt is on the line.
-            # don't normalize n
-            nhat = n
-        else:
-            nhat = n/n_mag
-       
-        u_mag = np.linalg.norm(u)
-        if u_mag == 0:
-            # pt is on the line
-            # dont normalize
-            uhat = u
-        else:
-            uhat = u/u_mag
-        # perp distance is the dot product between the normal
-        # and the vector from pt to p1
-        signed_perp_distance = np.dot(nhat, u)
-
         # project the point onto the line 
-        pt_proj = pt + abs(signed_perp_distance)*uhat
-        dist = abs(signed_perp_distance)
-
+        pt_proj = pt + n 
+        
+        
+        perp_dist = n_mag
+        
+        nhat = n if n_mag == 0 else n/n_mag
         if pt_in_segment(p1, p2, pt_proj):
             # if the projected point is on the line segment
             # then the distance is  the perpindicular distance
-            dist = abs(signed_perp_distance)
+            dist = perp_dist
         else: 
             # if the point is not on the line segment then the distance is
             # the minimum distance to the end points.
-            d1 = np.linalg.norm(u)
+            d1 =u_mag
 
             #vector from pt to p2
             w = p2 - pt
-            d2 = np.linalg.norm(w)
+            w_mag = np.linalg.norm(w)
+            d2 = w_mag
+            what = w if w_mag == 0 else w/w_mag
 
             # update normal vector to point toward the end points
-            if d1 < d2:
-                n = u 
+            if d1 < d2 and not onpath:
+                nhat = uhat 
                 dist = d1
                 pt_proj = p1
             else:
-                n = w
+                nhat = what
                 dist = d2
                 pt_proj = p2
-            # this should never happen n_mag == 0:
-            n_mag = np.linalg.norm(n)
-            nhat = n/n_mag
-        return dist, nhat, pt_proj, v
+        return dist, nhat, pt_proj, vhat
 
     def lookahead_point_on_trajectory(self, point):
         dists = []
@@ -190,15 +178,27 @@ class PurePursuit:
             dists.append((d,n,pt,v,i))
             
             pose = np.array(pt.tolist() + self.trajectory[i,3:].tolist()) 
-            #self.lookahead_point_pub.publish(make_circle_marker(
-            #    pose, 0.001, [1.0,0.0,.0], self.root_frame, self.viz_namespace+"baa" + str(i), 1, 3))
+            self.lookahead_point_pub.publish(make_circle_marker(
+                pose, 0.001, [1.0,0.0,.0], self.root_frame, self.viz_namespace+"baa" + str(i), 1, 3))
 
 
         nearest = min(dists, key=lambda x: x[0])
-        d, n, nearest_pt, v, nearest_i = nearest
+        same_dists = [x for x in dists if x[0] == nearest[0]]
+        if len(same_dists) > 1:
+            nearest= max(same_dists, key=lambda x: x[-1])
 
+        d, n, nearest_pt, v, nearest_i = nearest
+        # recompute nearest_pt for current line segment.  force
+        # always moving forward on path
+        p1 = self.trajectory[nearest_i-1, (0,1,2)]
+        p2 = self.trajectory[nearest_i, (0,1,2)]
+        d, n, pt, v = self.pt_to_line_segment_distance(point, p1, p2,onpath=True)
+        
         # ignore earlier segments
         dists = dists[nearest_i:]
+        dists[0] = (d,n,pt,v,i)
+
+
         lookahead_points = []
         for (d, n, pt, v, j) in  dists:
 
@@ -230,8 +230,8 @@ class PurePursuit:
 
                 if not pt_in_segment(p1, p2, lookahead_pt):
                     # lookeahed point is too far, just use end of line segment
-                    pass #
-                    #lookahead_pt = p2
+                    lookahead_pt = p2
+                    dist_from_traj = 0
             else:
                 # project lookahead distance from point along the normal
                 lookahead_pt = point + self.lookahead*n
@@ -240,7 +240,13 @@ class PurePursuit:
             d_to_lookahead = np.linalg.norm(point - lookahead_pt)
             dist_from_lookahead = abs(self.lookahead - d_to_lookahead)
             lookahead_points.append((dist_from_lookahead,dist_from_traj, lookahead_pt, j))
-        dist_from_lookahead, dist_from_traj,  lookahead_pt, i = min(lookahead_points, key = lambda x:(x[0], x[1]))
+        try:
+
+            dist_from_lookahead, dist_from_traj,  lookahead_pt, i = min(lookahead_points, key = lambda x:(x[0], x[1]))
+        except:
+            self.trajectory = None
+            import pdb; pdb.set_trace()
+
         # just use quaternion from traj for now 
         # quaternion should be interpolated tho :(
         lookahead_pt =np.array( lookahead_pt.tolist() + self.trajectory[i, 3:].tolist())
@@ -278,82 +284,19 @@ class PurePursuit:
                 - If nearest_point is less than the lookahead distance, find the lookahead point as normal
         '''
         # stop if no trajectory has been received
-        if self.trajectory is None:
+        if self.trajectory is None: # or self.iters > 0:
             return self.stop()
-        # this instructs the trajectory to convert the list of waypoints into a numpy matrix
-        #if self.trajectory.dirty():
-        #    self.trajectory.make_np_array()
 
-        # step 1
-        #nearest_point, nearest_dist, t, i = utils.nearest_point_on_trajectory(pose[:2], self.trajectory.np_points)
-        #self.nearest_point, nearest_idx  = self.nearest_point_on_trajectory(pose[:3])
-        #self.lookahead_point = self.trajectory[ (nearest_idx +5 )% len(self.trajectory)]
-        self.pose = pose
+        self.iters += 1
 
         self.nearest_point, self.lookahead_point = self.lookahead_point_on_trajectory(pose[:3])
 
         pose =PoseStamped(make_header(self.root_frame),  Pose(Point(*self.lookahead_point[:3]), Quaternion(*self.lookahead_point[3:])))
-        if (self.iters %100) == 0:
+        if (self.iters %1) == 0:
             self.control_pub.publish(pose)
-
         
-
-        
-        """
-        if nearest_dist < self.lookahead:
-            # step 2
-            lookahead_point, i2, t2 = \
-                utils.first_point_on_trajectory_intersecting_circle(pose[:2], self.lookahead, self.trajectory.np_points, i+t, wrap=self.wrap)
-            if i2 == None:
-                if self.iters % 5 == 0:
-                    print "Could not find intersection, end of path?"
-                self.lookahead_point = None
-            else:
-                if self.iters % 5 == 0:
-                    print "found lookahead point"
-                self.lookahead_point = lookahead_point
-        elif nearest_dist < self.max_reacquire:
-            if self.iters % 5 == 0:
-                print "Reacquiring trajectory"
-            self.lookahead_point = self.nearest_point
-        else:
-            self.lookahead_point = None
-        # stop of there is no navigation target, otherwise use ackermann geometry to navigate there
-        if not isinstance(self.lookahead_point, np.ndarray):
-            self.stop()
-        else:
-            steering_angle = self.determine_steering_angle(pose, self.lookahead_point)
-            # send the control commands
-            self.apply_control(self.speed, steering_angle)
-
-        """
         self.visualize()
-    """
-    def determine_steering_angle(self, pose, lookahead_point):
-        ''' Given a robot pose, and a lookahead point, determine the open loop control 
-            necessary to navigate to that lookahead point. Uses Ackermann steering geometry.
-        '''
-        # get the lookahead point in the coordinate frame of the car
-        rot = utils.rotation_matrix(-pose[2])
-        delta = np.array([lookahead_point - pose[0:2]]).transpose()
-        local_delta = (rot*delta).transpose()
-        local_delta = np.array([local_delta[0,0], local_delta[0,1]])
-        # use the ackermann model
-        steering_angle = self.model.steering_angle(local_delta)
-        return steering_angle
-        
-    def apply_control(self, speed, steering_angle):
-        self.actual_speed = speed
-        drive_msg_stamped = AckermannDriveStamped()
-        drive_msg = AckermannDrive()
-        drive_msg.speed = speed
-        drive_msg.steering_angle = steering_angle
-        drive_msg.acceleration = 0
-        drive_msg.jerk = 0
-        drive_msg.steering_angle_velocity = 0
-        drive_msg_stamped.drive = drive_msg
-        self.control_pub.publish(drive_msg_stamped)
-    """    
+       
     def stop(self):
         #rospy.loginfo("stop not implemented")
         return
@@ -403,7 +346,7 @@ def make_circle_marker(point, scale, color, frame_id, namespace, sid, duration=0
     marker.ns = namespace
     marker.id = sid
     marker.type = 2
-    marker.lifetime = rospy.Duration.from_sec(duration)
+    marker.lifetime = rospy.Duration.from_sec(20)#duration)
     marker.action = 0
     marker.pose.position.x = point[0]
     marker.pose.position.y = point[1]
@@ -469,8 +412,8 @@ def in_range(x1, x2, x0):
     return left >= 0 and right >= 0
 
 def pt_in_segment(p1, p2, pt):
-    return np.all(pt > p1) and np.all(pt <p2) or\
-            np.all(pt > p2) and np.all(pt <p1)
+    return (np.all(pt >= p1) and np.all(pt <= p2)) or\
+            (np.all(pt >= p2) and np.all(pt<= p1))
     valid =  True
     for i in range(3):
         valid &= in_range(p1[i], p2[i], pt[i])

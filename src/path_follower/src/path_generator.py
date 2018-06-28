@@ -8,8 +8,8 @@ from std_msgs.msg import Header
 import numpy as np
 import tf
 import rospy
-pos = (.9, -0.18, 0.23)
-quat = Quaternion(0, 0, 0, 1)
+pos = (.7, -0.18, 0.23)
+quat = Quaternion(0, -.7071, 0, .7071)
 
 class PathGenerator:
     def __init__(self, arm, root_frame, tool_frame, tf_listener=None):
@@ -22,7 +22,7 @@ class PathGenerator:
         self.sub = rospy.Subscriber("/clicked_point", PointStamped, \
                         self.updateOrigin)
         self.origin_updated = False
-        self.origin = Point(0.9, -0.18, 0.23) #XXX todo : make this current pose
+        self.origin = Point(0.6, -0.18, 0.23) #XXX todo : make this current pose
         self.quat =quat # Quaternion(0,0,0,1)
 
         if tf_listener is None:
@@ -39,7 +39,7 @@ class PathGenerator:
             rospy.loginfo("updated origin to (%.2f %.2f %.2f)" % \
                     (self.origin.x, self.origin.y, self.origin.z)
                     )
-        self.circle(.2)
+        self.circle(.1)
 
     def stamp_pose(self, (pos,quat)):
         ps = PoseStamped( 
@@ -51,7 +51,7 @@ class PathGenerator:
     def get_header(self):
         return Header(0, rospy.Time(0), self.root_frame)
 
-    def circle(self, r):
+    def circle(self, r, pathnum=0):
         """ generator points around a circle with radius r"""
         rospy.loginfo("generating a circle path")
         
@@ -59,35 +59,36 @@ class PathGenerator:
         quat = self.quat
         header = self.get_header()
         
-        disc = 4
+        disc =16
         path = Path()
         path.header = header
+        for i in range(disc + 1):
+            th =  .5*np.pi*(pathnum %4) + .5*np.pi*float(i)/disc
+            x = r*np.cos(th) + origin.x # +  r*(float(i)/disc)
 
-        for i in range(disc):
-            th =4*2*np.pi*float(i)/disc
-            x = r*np.cos(th) + origin.x
-            y = r*np.sin(th) + origin.y
-            z = origin.z + r*(float(i)/disc)
+            y = r*np.sin(th) + origin.y #+ r*(float(i)/disc)
+            z = origin.z #+  ((-1)**i) * r*(float(i)/disc)
             pos = Point(x,y,z)
             ps = PoseStamped(header, Pose(pos, quat))
             path.poses.append(ps)
+        
         self.path_pub.publish(path)
-
-
+        self.pub.publish(path.poses[0])
 
 if __name__=="__main__":
     rospy.init_node("path_generator")
     arm = 'r'
     root_frame = 'torso_lift_link'
     tool_frame = '%s_gripper_tool_frame' % arm
-    pos = (.9, -0.18, 0.23)
 
     pg = PathGenerator(arm, root_frame, tool_frame)
     rospy.sleep(.5)
-    
+    #pg.circle(.12)
+    i = 0 
     while True:
-        pg.circle(.1)
-        rospy.sleep(1)
+        i += 1 
+        pg.circle(.15, i)
+        rospy.sleep(5)
     rospy.spin()
 
 """
