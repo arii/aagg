@@ -62,8 +62,9 @@ class PathGenerator:
         disc =16
         path = Path()
         path.header = header
-        for i in range(disc + 1):
-            th =  .5*np.pi*(pathnum %4) + .5*np.pi*float(i)/disc
+        for i in range(disc ):
+            #th =  .5*np.pi*(pathnum %4) + .5*np.pi*float(i)/disc
+            th =  2*np.pi*float(i)/disc
             x = r*np.cos(th) + origin.x # +  r*(float(i)/disc)
 
             y = r*np.sin(th) + origin.y #+ r*(float(i)/disc)
