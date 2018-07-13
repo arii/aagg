@@ -59,10 +59,10 @@ class PathGenerator:
         quat = self.quat
         header = self.get_header()
         
-        disc =16
+        disc =8
         path = Path()
         path.header = header
-        for i in range(disc ):
+        for i in range(disc -1):
             #th =  .5*np.pi*(pathnum %4) + .5*np.pi*float(i)/disc
             th =  2*np.pi*float(i)/disc
             x = r*np.cos(th) + origin.x # +  r*(float(i)/disc)
@@ -89,7 +89,7 @@ if __name__=="__main__":
     while True:
         i += 1 
         pg.circle(.15, i)
-        rospy.sleep(5)
+        rospy.sleep(10)
     rospy.spin()
 
 """

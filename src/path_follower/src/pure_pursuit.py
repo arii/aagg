@@ -116,8 +116,9 @@ class PurePursuit:
         msginfo =  "Receiving new trajectory:" + str( len(msg.poses)) +  "points" 
         rospy.loginfo(msginfo)
         self.trajectory = None
+        self.current_segment = 0
         rospy.loginfo("HACK! waiting to go to start of traj.")
-        rospy.sleep(1)
+        rospy.sleep(3)
         traj = [self.pose]
         for pose in msg.poses:
             pos = pose.pose.position
@@ -190,7 +191,7 @@ class PurePursuit:
             p1 = self.trajectory[i-1, (0,1,2)]
             p2 = self.trajectory[i, (0,1,2)]
             d, n, pt, v = self.pt_to_line_segment_distance(point, p1, p2)
-            d = np.round(d,3)
+            d = np.round(d,5)
             dists.append((d,n,pt,v,i))
             
             pose = np.array(pt.tolist() + self.trajectory[i,3:].tolist()) 
@@ -217,7 +218,7 @@ class PurePursuit:
         
         # ignore earlier segments
         dists = dists[nearest_i:]
-        dists[0] = (d,n,pt,v,i)
+        dists[0] = (d,n,pt,v,nearest_i)
         self.current_segment = nearest_i
 
         on_trajectory = np.linalg.norm(pt - point) < self.lookahead
@@ -259,23 +260,30 @@ class PurePursuit:
             else:
                 # project lookahead distance from point along the normal
                 lookahead_pt = point + self.lookahead*n
-                dist_from_traj = np.round(np.abs(d - self.lookahead),3)
+                dist_from_traj = np.round(np.abs(d - self.lookahead),5)
 
             d_to_lookahead = np.linalg.norm(point - lookahead_pt)
-            dist_from_lookahead = np.round(np.abs(self.lookahead - d_to_lookahead), 3)
+            dist_from_lookahead = np.round(np.abs(self.lookahead - d_to_lookahead), 5)
             
             dist_from_current_segment = j - self.current_segment  
             
-            lookahead_points.append((dist_from_lookahead,dist_from_traj, dist_from_current_segment,  lookahead_pt, j))
+            lookahead_points.append((dist_from_lookahead,dist_from_traj, d_to_lookahead,dist_from_current_segment,  lookahead_pt, j))
+            #lookahead_points.append((dist_from_lookahead,dist_from_traj, dist_from_current_segment,  lookahead_pt, j))
         try:
 
-            dist_from_lookahead, dist_from_traj, dist_from_current_segment, lookahead_pt, i = min(lookahead_points, key = lambda x:(x[0], x[2], x[1]))
-            lookahead_points = sorted(lookahead_points, key = lambda x:(x[0], x[2], x[1]))
-        except:
+            dist_from_lookahead, dist_from_traj, d_to_lookahead, dist_from_current_segment, lookahead_pt, i = min(lookahead_points, key = lambda x:x[0:4])
+            lookahead_points = sorted(lookahead_points, key = lambda x:x[0:4])
+            
+            nearest = lookahead_points[0][0:3]
+            same_dists = [x for x in lookahead_points if x[0:3] ==nearest]
+
+            #if len(same_dists) > 1:
+            #    dist_from_lookahead, dist_from_traj, d_to_lookahead, dist_from_current_segment, lookahead_pt, i  = same_dists[-1]
+
+        except Exception as e:
+            print e
             self.trajectory = None
             import pdb; pdb.set_trace()
-        #self.trajectory = None
-        #import pdb; pdb.set_trace()
 
         # just use quaternion from traj for now 
         # quaternion should be interpolated tho :(
@@ -283,7 +291,7 @@ class PurePursuit:
         nearest_pt = np.array (nearest_pt.tolist() +  self.trajectory[i, 3:].tolist())
         
         for j, traj in enumerate(self.trajectory[i:]):
-            pose = lookahead_points[j][3].tolist() + traj[3:].tolist()
+            pose = lookahead_points[j][4].tolist() + traj[3:].tolist()
             
             #self.lookahead_point_pub.publish(make_circle_marker(
             #    pose, 0.001, [0.0,1.0,1.0], self.root_frame, self.viz_namespace+"aa" + str(j), 1, 3))
