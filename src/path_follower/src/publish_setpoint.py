@@ -6,12 +6,13 @@ from std_msgs.msg import Header
 import rospy
 rospy.init_node("simple_pose_publisher")
 arm = 'r'
-root_frame = 'base_link'
+root_frame = 'torso_lift_link'
 tool_frame = '%s_gripper_tool_frame' % arm
-pos = (.97, -0.18, 0.99)
+pos = (.7, -0.18, 0.29)
 quat = (0, 0, 0, 1)
 
-pub = rospy.Publisher("%s_cart/command_pose" % arm,\
+pub = rospy.Publisher("pose_generated", \
+#pub = rospy.Publisher("%s_cart/command_pose" % arm,\
                         PoseStamped, queue_size=1)
 
 
