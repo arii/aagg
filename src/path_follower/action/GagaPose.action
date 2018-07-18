@@ -1,0 +1,22 @@
+# the desired pose of the tool 
+geometry_msgs/PoseStamped pose
+
+# lookahead distance 
+std_msgs/Float32 lookahead
+
+# distance to goal pose to reach goal
+std_msgs/Float32 goal_cartesian_tolerance
+std_msgs/Float32 goal_quaternion_tolerance
+
+
+---
+#result definition
+
+
+---
+
+#feedback
+
+std_msgs/Float32 cartesian_error
+std_msgs/Float32 quaternion_error
+

@@ -8,6 +8,9 @@ from std_msgs.msg import Header
 import numpy as np
 import tf
 import rospy
+import actionlib
+import path_follower.msg 
+
 
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Vector3, Point, Pose, PoseStamped, PoseArray, Quaternion, PolygonStamped, Polygon, Point32, PoseWithCovarianceStamped, PointStamped
@@ -29,12 +32,24 @@ TODO:
 
 """
 
-class PoseFollower:
+class PoseFollower(object):
+    _feedback = path_follower.msg.GagaPoseFeedback()
+    _result = path_follower.msg.GagaPoseResult()
     
     def __init__(self):
+        self._action_name = rospy.get_name()
+        self._as = actionlib.SimpleActionServer(
+                self._action_name, 
+                path_follower.msg.GagaPoseAction,
+                execute_cb = self.execute_cb,
+                auto_start = False
+                )
+
 
         self.pose_topic = rospy.get_param("~pose_topic", "pose_generated")
         self.lookahead        = float(rospy.get_param("~lookahead", ".01"))
+        self.goal_cartesian_tolerance       = float(rospy.get_param("~goal_cartesian_tolerance", ".01"))
+        self.goal_quaternion_tolerance       = float(rospy.get_param("~goal_quaternion_tolerance", ".01"))
         self.max_reacquire    = rospy.get_param("~max_reacquire", ".1")
         self.root_frame    = rospy.get_param("~root_frame", "torso_lift_link")
         self.controller_namespace   = rospy.get_param("~controller", "r_cart")
@@ -59,9 +74,27 @@ class PoseFollower:
         
         # topic to listen for odometry messages, either from particle filter or the simulator
         self.control_state_sub = rospy.Subscriber(self.controller_namespace+"/state", ControllerState, self.controller_state_callback, queue_size=1)
-
+        
+        self._as.start()
 
         rospy.loginfo("pure pursuit initialized! hello :)")
+
+    def execute_cb(self, goal):
+        if goal.lookahead != 0 and self.lookahead != goal.lookahead:
+            self.lookahead = goal.lookahead
+            rospy.loginfo ("updated lookahead to %.3f" % goal.lookahead)
+        
+        if goal.goal_cartesian_tolerance != 0 and self.goal_cartesian_tolerance != goal.goal_cartesian_tolerance:
+            self.goal_cartesian_tolerance = goal.goal_cartesian_tolerance
+            rospy.loginfo ("updated goal_cartesian_tolerance to %.3f" % goal.goal_cartesian_tolerance)
+        
+        if goal.goal_quaternion_tolerance != 0 and self.goal_quaternion_tolerance != goal.goal_quaternion_tolerance:
+            self.goal_quaternion_tolerance = goal.goal_quaternion_tolerance
+            rospy.loginfo ("updated goal_quaternion_tolerance to %.3f" % goal.goal_quaternion_tolerance)
+
+        self.pose_callback(goal.pose)
+
+
 
     def controller_state_callback(self, msg):
 
@@ -128,7 +161,7 @@ class PoseFollower:
         '''Determines and applies lookahead control law
         '''
         # stop if no trajectory has been received
-        if self.desired_pose is None :
+        if self.desired_pose is None  or self._as.is_preempt_requested():
             return self.stop()
 
         # compute cartesian lookahead distance
@@ -151,6 +184,17 @@ class PoseFollower:
                 Pose(Point(*control_pose[:3]), Quaternion(*control_pose[3:])))
 
         self.control_pub.publish(pose_msg)
+        
+
+        if cart_error <= self.goal_cartesian_tolerance and \
+            quart_error <= self.goal_quaternion_tolerance:
+            self.desired_pose = None
+            self._as.set_succeeded(self._result)
+
+        self._feedback.cartesian_error = cart_error
+        self._feedback.quaternion_error = quat_error
+        self._as.publish_feedback(self._feedback)
+
         self.visualize()
        
     def stop(self):
