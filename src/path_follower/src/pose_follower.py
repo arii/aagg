@@ -60,6 +60,7 @@ class PoseFollower(object):
         self.desired_pose  = None
         self.lookahead_pose = None
         self.controller_state = None
+        self.abort = False
         self.controller_state_timer = Timer(10)
 
         # set up the visualization topic to show the desired point and the lookahead point
@@ -92,7 +93,22 @@ class PoseFollower(object):
             self.goal_quaternion_tolerance = goal.goal_quaternion_tolerance
             rospy.loginfo ("updated goal_quaternion_tolerance to %.3f" % goal.goal_quaternion_tolerance)
 
+        if goal.timeout == rospy.Duration(0):
+            rospy.loginfo("no timeout requested")
+            endtime = None
+        else:
+            endtime = rospy.Time.now() + goal.timeout
+
         self.pose_callback(goal.pose)
+
+        alerted = False
+        r = rospy.Rate(100)
+        while self._as.is_active():
+            if endtime is not None and rospy.Time.now() > endtime:
+                if not alerted:
+                    rospy.loginfo("Ran out of time!")
+                    self.abort = True
+            r.sleep()
 
 
 
@@ -105,9 +121,9 @@ class PoseFollower(object):
         self.current_pose = np.array(pt)
         self.pose_follower( self.current_pose)
         # this is for timing info
-        self.controller_state_timer.tick()
-        if self.desired_pose is not None and self.iters % 20 == 0:
-            rospy.loginfo("Control fps: %.2f"% self.controller_state_timer.fps())
+        #self.controller_state_timer.tick()
+        #if self.desired_pose is not None and self.iters % 20 == 0:
+        #    rospy.loginfo("Control fps: %.2f"% self.controller_state_timer.fps())
 
 
     def visualize(self):
@@ -132,6 +148,7 @@ class PoseFollower(object):
         quat = msg.pose.orientation
         pt = [pos.x, pos.y, pos.z, quat.x, quat.y, quat.z, quat.w]
         self.desired_pose = np.array(pt)
+        self.abort = False
         msginfo =  ("Receiving new pose (%s)" % ",".join(["%.3f"%x for x in pt]))
         rospy.loginfo(msginfo)
         
@@ -153,27 +170,44 @@ class PoseFollower(object):
         x_desi = self.desired_pose[3:]
         x_curr = pose[3:]
         #slerp
-        return x_curr, 0
+        return x_curr, 0.0
 
 
      
     def pose_follower(self, pose):
         '''Determines and applies lookahead control law
         '''
+        
         # stop if no trajectory has been received
-        if self.desired_pose is None  or self._as.is_preempt_requested():
+        if self.desired_pose is None  or not self._as.is_active():
             return self.stop()
 
+        if self._as.is_preempt_requested():
+            self.desired_pose = None
+            self._as.set_preempted()
+            return self.stop()
+
+        if self.abort:
+            self.desired_pose = None
+            self._as.set_aborted()
+            return self.stop()
+        
+
+
         # compute cartesian lookahead distance
-        pos, cart_err = self.compute_cartesian_lookahead(pose)
+        pos, cart_error = self.compute_cartesian_lookahead(pose)
 
         # compute quaternion lookahead
-        quat, quat_err = self.compute_quaternion_lookahead(pose)
+        quat, quat_error = self.compute_quaternion_lookahead(pose)
         
         self.lookahead_pose = np.hstack([pos,quat])
 
         # go to desired pose instead of lookahead if error is small
-        if cart_err < self.lookahead:
+        
+        #if cart_error <= self.goal_cartesian_tolerance and \
+        #    quat_error <= self.goal_quaternion_tolerance:
+        if cart_error < self.lookahead:
+            self.lookahead*= 0.5
             control_pose = pose
         else:
             control_pose = self.lookahead_pose
@@ -184,18 +218,23 @@ class PoseFollower(object):
                 Pose(Point(*control_pose[:3]), Quaternion(*control_pose[3:])))
 
         self.control_pub.publish(pose_msg)
+        self.controller_state_timer.tick()
         
 
+
+        if self.iters % 20 == 0:
+            self._feedback.cartesian_error = cart_error
+            self._feedback.quaternion_error = quat_error
+            self._feedback.fps = self.controller_state_timer.fps()
+            self._as.publish_feedback(self._feedback)
+            self.visualize()
+
+
         if cart_error <= self.goal_cartesian_tolerance and \
-            quart_error <= self.goal_quaternion_tolerance:
+            quat_error <= self.goal_quaternion_tolerance:
             self.desired_pose = None
             self._as.set_succeeded(self._result)
 
-        self._feedback.cartesian_error = cart_error
-        self._feedback.quaternion_error = quat_error
-        self._as.publish_feedback(self._feedback)
-
-        self.visualize()
        
     def stop(self):
         #rospy.loginfo("stop not implemented")

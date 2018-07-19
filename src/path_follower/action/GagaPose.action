@@ -2,11 +2,14 @@
 geometry_msgs/PoseStamped pose
 
 # lookahead distance 
-std_msgs/Float32 lookahead
+float32 lookahead
 
 # distance to goal pose to reach goal
-std_msgs/Float32 goal_cartesian_tolerance
-std_msgs/Float32 goal_quaternion_tolerance
+float32 goal_cartesian_tolerance
+float32 goal_quaternion_tolerance
+
+# timeout for completing action
+duration timeout
 
 
 ---
@@ -17,6 +20,7 @@ std_msgs/Float32 goal_quaternion_tolerance
 
 #feedback
 
-std_msgs/Float32 cartesian_error
-std_msgs/Float32 quaternion_error
+float32 cartesian_error
+float32 quaternion_error
+int32 fps
 
