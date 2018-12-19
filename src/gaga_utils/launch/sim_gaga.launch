@@ -8,7 +8,7 @@
     <arg name="paused" value="$(arg paused)" />
   </include>
 
-    <include file="$(find pr2_gazebo)/launch/pr2_no_controllers.launch"/>
+    <include file="$(find gaga_utils)/launch/gazebo/pr2_no_controllers.launch"/>
     <!-- gazebo doesn't launch fast enough for rviz to work
     <include file="$(find gaga_utils)/launch/rviz_gaga.launch"/>
     -->
