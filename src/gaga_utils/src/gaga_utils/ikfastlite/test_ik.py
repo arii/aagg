@@ -4,6 +4,7 @@ from gaga_utils.ikfastlite import ikLeft, ikRight
 import tf.transformations as tfx
 import numpy as np
 
+#XXX ISSUES: these are only from base_link to arm_gripper_tool_frame
 
 class ikWrapper:
 
