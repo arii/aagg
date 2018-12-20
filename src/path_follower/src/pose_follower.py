@@ -10,6 +10,7 @@ import tf
 import rospy
 import actionlib
 import path_follower.msg 
+import tf.transformations as tfx
 
 
 from visualization_msgs.msg import Marker, MarkerArray
@@ -20,14 +21,12 @@ from robot_mechanism_controllers.msg import JTCartesianControllerState \
 
 """
 TODO:
-    add simple action client wrapper  ?
 
     include quaternion interpolation
 
     include quaternion in distance computation
-
-    what if curvature is too tight?/ wrap around 
-    -- make sure we keep trying to move forward
+    
+    if we stop moving but don't reach goal then throw error
 
 
 """
@@ -48,6 +47,9 @@ class PoseFollower(object):
 
         self.pose_topic = rospy.get_param("~pose_topic", "pose_generated")
         self.lookahead        = float(rospy.get_param("~lookahead", ".01"))
+        self.lookahead_quat        = float(rospy.get_param("~lookaheadquat", "0.1"))
+        self.cart_stopped = float(rospy.get_param("~cartstopped", "0.001"))
+        self.ang_stopped = float(rospy.get_param("~angstopped", "0.0001"))
         self.goal_cartesian_tolerance       = float(rospy.get_param("~goal_cartesian_tolerance", ".01"))
         self.goal_quaternion_tolerance       = float(rospy.get_param("~goal_quaternion_tolerance", ".01"))
         self.max_reacquire    = rospy.get_param("~max_reacquire", ".1")
@@ -98,7 +100,8 @@ class PoseFollower(object):
             endtime = None
         else:
             endtime = rospy.Time.now() + goal.timeout
-
+        
+        self.iters = 0
         self.pose_callback(goal.pose)
 
         alerted = False
@@ -120,10 +123,6 @@ class PoseFollower(object):
         pt = [pos.x, pos.y, pos.z, quat.x, quat.y, quat.z, quat.w]
         self.current_pose = np.array(pt)
         self.pose_follower( self.current_pose)
-        # this is for timing info
-        #self.controller_state_timer.tick()
-        #if self.desired_pose is not None and self.iters % 20 == 0:
-        #    rospy.loginfo("Control fps: %.2f"% self.controller_state_timer.fps())
 
 
     def visualize(self):
@@ -135,7 +134,7 @@ class PoseFollower(object):
         if isinstance(self.lookahead_pose, np.ndarray):
 
             self.lookahead_pose_pub.publish(make_circle_marker(
-                self.desired_pose, 0.015, [0.1,0.3,1.0], self.root_frame, self.viz_namespace+"desiredpose", 0, 3, .25))
+                self.desired_pose, 0.015, [0.,1.0,.0], self.root_frame, self.viz_namespace+"desiredpose", 0, 3, .25))
             self.lookahead_pose_pub.publish(make_circle_marker(
                 self.current_pose, self.lookahead*2, [0.0,0.0,1.0], self.root_frame, self.viz_namespace+"lookaheadsphere", 0, 3, .25))
             self.lookahead_pose_pub.publish(make_circle_marker(
@@ -167,11 +166,25 @@ class PoseFollower(object):
         return x_look, x_err_norm
 
     def compute_quaternion_lookahead(self, pose):
+
         x_desi = self.desired_pose[3:]
         x_curr = pose[3:]
-        #slerp
-        return x_curr, 0.0
 
+        quat = tfx.quaternion_slerp(x_curr, x_desi, self.lookahead_quat)
+        # compute angle between quaternions
+        err = np.abs(np.arccos(np.dot(x_desi, x_curr))) % np.pi
+    
+        return quat, err #x_curr, 0.0
+
+    def detect_stopped(self):
+        twist = self.controller_state.xd
+
+        lin = [twist.linear.x, twist.linear.y, twist.linear.z]
+        ang = [twist.angular.x, twist.angular.y, twist.angular.z]
+        cart_motion = np.linalg.norm(lin)
+        ang_motion = np.linalg.norm(ang)
+        return cart_motion, ang_motion
+        
 
      
     def pose_follower(self, pose):
@@ -203,14 +216,18 @@ class PoseFollower(object):
         self.lookahead_pose = np.hstack([pos,quat])
 
         # go to desired pose instead of lookahead if error is small
-        
-        #if cart_error <= self.goal_cartesian_tolerance and \
-        #    quat_error <= self.goal_quaternion_tolerance:
         if cart_error < self.lookahead:
-            self.lookahead*= 0.5
-            control_pose = pose
+            control_pos = pose[:3]
         else:
-            control_pose = self.lookahead_pose
+            control_pos = pos
+
+        if quat_error < self.lookahead_quat:
+            control_quat = pose[3:]
+        else:
+            control_quat = quat
+
+        control_pose = np.hstack([control_pos, control_quat])
+
 
         self.iters += 1
         
@@ -222,18 +239,26 @@ class PoseFollower(object):
         
 
 
-        if self.iters % 20 == 0:
+        if self.iters  % 50 == 0:
             self._feedback.cartesian_error = cart_error
             self._feedback.quaternion_error = quat_error
             self._feedback.fps = self.controller_state_timer.fps()
             self._as.publish_feedback(self._feedback)
             self.visualize()
-
-
+   
         if cart_error <= self.goal_cartesian_tolerance and \
             quat_error <= self.goal_quaternion_tolerance:
-            self.desired_pose = None
+            rospy.loginfo("Succeeded in reaching desired pose")
             self._as.set_succeeded(self._result)
+
+        else:
+            if self.iters < 10: 
+                return
+            cart_motion, ang_motion = self.detect_stopped()
+            if cart_motion < self.cart_stopped and ang_motion < self.ang_stopped:
+                rospy.logwarn("Stop detected and goal position not reached.  Abort!")
+                self._as.set_aborted()
+
 
        
     def stop(self):
@@ -334,48 +359,6 @@ def pt_in_segment(p1, p2, pt):
     return (np.all(pt >= p1) and np.all(pt <= p2)) or\
             (np.all(pt >= p2) and np.all(pt<= p1))
     
-"""      
-def dist_line_pt(p1, p2, pt):
-    x0,y0 = pt
-    x1,y1 = p1
-    x2,y2 = p2
-
-    num =abs((y2 - y1)*x0 - (x2-x1)*y0 + x2*y1 - y2*x1)
-    den =( (y2-y1)**2 + (x2-x1)**2)** 0.5
-    if den != 0:
-        d = num/den
-    else:
-        d = ( (x0 - x1)**2 + (y0-y1)**2 )**0.5
-
-    # make sure pt is on line segment
-    n_l = [-(y2-y1), (x2-x1)]
-    n_r = [(y2-y1), -(x2-x1)]
-    valids = []
-    for n in [n_l, n_r]:
-        n_hat = MU.unit(n)
-        x_i = x0 + n_hat[0]*abs(d)
-        y_i = y0 + n_hat[1]*abs(d)
-        p_i = (x_i, y_i)
-
-        valids.append(pt_in_segment(p1, p2, p_i) )# (in_range(x1, x2, x_i) and in_range(y1, y2, y_i))
-
-    if not any(valids): 
-        d1 = MU.norm(pt, p1)
-        d2 = MU.norm(pt, p2)
-        d  = d1 if d1 <= d2 else d2
-    #print '\t', p1,p2,pt,
-    #print "\t %s" % any(valids), d
-    return d
-
-
-def dist_line_segs((a1,a2), (b1,b2) ):
-    dists = []
-    dists.append(dist_line_pt (a1, a2, b1))
-    dists.append(dist_line_pt (a1, a2, b2))
-    dists.append(dist_line_pt (b1, b2, a1))
-    dists.append(dist_line_pt (b1, b2, a2))
-    return min(dists)
-"""
 
 if __name__=="__main__":
     rospy.init_node("pose_follower")
