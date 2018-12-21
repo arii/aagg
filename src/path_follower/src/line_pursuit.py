@@ -83,7 +83,8 @@ class PurePursuit:
         quat = msg.x.pose.orientation
         pt = [pos.x, pos.y, pos.z, quat.x, quat.y, quat.z, quat.w]
         self.pose = np.array(pt)
-        self.pure_pursuit( self.pose)
+        if self.trajectory is not None:
+            self.pure_pursuit(self.pose, self.trajectory)
         # this is for timing info
         self.controller_state_timer.tick()
         if self.trajectory is not None and self.iters % 20 == 0:
@@ -117,9 +118,9 @@ class PurePursuit:
         rospy.loginfo(msginfo)
         self.trajectory = None
         self.current_segment = 0
-        rospy.loginfo("HACK! waiting to go to start of traj.")
-        rospy.sleep(3)
-        traj = [self.pose]
+        #rospy.loginfo("HACK! waiting to go to start of traj.")
+        #rospy.sleep(3)
+        traj = [] #self.pose]
         for pose in msg.poses:
             pos = pose.pose.position
             quat = pose.pose.orientation
@@ -193,6 +194,7 @@ class PurePursuit:
         # compute lookahead point and compute its distance to trajectory
         lookahead_pt = None
         dist_to_traj = 0
+        #import pdb;pdb.set_trace()
         
         if dist == self.lookahead:
             
@@ -219,42 +221,60 @@ class PurePursuit:
             if not pt_in_segment(p1, p2, lookahead_pt):
                 # lookeahed point is too far, just use end of line segment
                 lookahead_pt = p2
-                dist_from_traj = 0
 
         else:
             # project lookahead distance from current point along the normal
             lookahead_pt = pt + self.lookahead*nhat
             dist_to_traj = dist - self.lookahead
-        return (dist_to_traj, lookahead_pt), (dist, nearest_pt)
+        #dist = np.round(dist, 5)
+        #dist_to_traj = np.round(dist_to_traj, 5)
+        non_dist_lookahead = np.abs(self.lookahead - np.linalg.norm(pt - lookahead_pt) )
+        return (dist_to_traj, non_dist_lookahead, lookahead_pt), (dist, nearest_pt)
 
 
-    def lookahead_point_on_trajectory(self, point):
+    def lookahead_point_on_trajectory(self, point, trajectory):
         lookahead_dists = []
         nearest_dists = []
 
         #self.control_state_sub.unregister()
+        #self.traj_sub.unregister()
 
-        for i in range(len(self.trajectory)):
-            p1 = self.trajectory[i-1, (0,1,2)]
-            p2 = self.trajectory[i, (0,1,2)]
+        for i in range(len(trajectory) - 1 ):
+            p1 = trajectory[i, (0,1,2)]
+            p2 = trajectory[i+1, (0,1,2)]
 
-            (dist_to_traj, lookahead_pt), (dist, nearest_pt) = \
+            (dist_to_traj, non_dist_lookahead, lookahead_pt), (dist, nearest_pt) = \
                     self.compute_lookahead_segment(point, p1, p2)
             #print dist_to_traj, dist
 
-            nearest_pose = np.array(nearest_pt.tolist() + self.trajectory[i,3:].tolist()) 
+            nearest_pose = np.array(nearest_pt.tolist() + trajectory[i,3:].tolist()) 
             self.nearest_point_pub.publish(make_circle_marker(
                 nearest_pose, 0.01, [1.0,1.0,.0], self.root_frame, self.viz_namespace+"baa" + str(i), 1, 3))
 
-            lookahead_pose = np.array(lookahead_pt.tolist() + self.trajectory[i,3:].tolist()) 
+            lookahead_pose = np.array(lookahead_pt.tolist() + trajectory[i,3:].tolist()) 
             self.lookahead_point_pub.publish(make_circle_marker(
                 lookahead_pose, 0.01, [0.0,1.0,1.0], self.root_frame, self.viz_namespace+"baa" + str(i), 1, 3))
 
             nearest_dists.append ( (dist, nearest_pose, i))
-            lookahead_dists.append( (dist_to_traj, lookahead_pose))
-        #import pdb; pdb.set_trace()
-        lookahead_dists = sorted(lookahead_dists, key=lambda x: x[0])
-        lookahead_pose = lookahead_dists[0][1]
+            lookahead_dists.append( (dist_to_traj, non_dist_lookahead, lookahead_pose))
+        
+        nearest_dists = sorted(nearest_dists, key=lambda x: x[0])
+        if nearest_dists[0][0] == nearest_dists[1][0]:
+            nearest_dists = nearest_dists[1:]
+        dist, nearest_pose, index = nearest_dists[0]
+        
+        lookahead_dists = lookahead_dists[:index-1] +  lookahead_dists[index:]
+
+
+        lookahead_dists = sorted(lookahead_dists, key=lambda x: (x[0], x[1]))
+        lookahead_pose = lookahead_dists[0][2]
+        #d = raw_input("type d to debug")
+        #if d == "d":
+        #    import pdb; pdb.set_trace()
+        #self.traj_sub = rospy.Subscriber(self.trajectory_topic, Path, self.trajectory_callback, queue_size=1)
+        #self.control_state_sub = rospy.Subscriber(self.controller_namespace+"/state", ControllerState, self.controller_state_callback, queue_size=1)
+
+
         return nearest_pose, lookahead_pose
 
 
@@ -383,7 +403,7 @@ class PurePursuit:
         dist_i = np.argmin(dist)
         return self.trajectory[dist_i], dist_i
 
-    def pure_pursuit(self, pose):
+    def pure_pursuit(self, pose, trajectory):
         ''' Determines and applies Pure Pursuit control law
 
             1. Find the nearest point on the trajectory
@@ -398,12 +418,12 @@ class PurePursuit:
                 - If nearest_point is less than the lookahead distance, find the lookahead point as normal
         '''
         # stop if no trajectory has been received
-        if self.trajectory is None :#
-            return self.stop()
+        #if self.trajectory is None :#
+        #    return self.stop()
         
         self.iters += 1
 
-        self.nearest_point, self.lookahead_point = self.lookahead_point_on_trajectory(pose[:3])
+        self.nearest_point, self.lookahead_point = self.lookahead_point_on_trajectory(pose[:3], trajectory)
 
         pose =PoseStamped(make_header(self.root_frame),  Pose(Point(*self.lookahead_point[:3]), Quaternion(*self.lookahead_point[3:])))
         if (self.iters %1) == 0:
@@ -516,8 +536,8 @@ def in_range(x1, x2, x0):
     return left >= 0 and right >= 0
 
 def pt_in_segment(p1, p2, pt):
-    return (np.all(pt >= p1) and np.all(pt <= p2)) or\
-            (np.all(pt >= p2) and np.all(pt<= p1))
+    #return (np.all(pt >= p1) and np.all(pt <= p2)) or\
+    #        (np.all(pt >= p2) and np.all(pt<= p1))
     valid =  True
     for i in range(3):
         valid &= in_range(p1[i], p2[i], pt[i])

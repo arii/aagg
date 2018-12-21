@@ -62,7 +62,7 @@ class PathGenerator:
         disc =8
         path = Path()
         path.header = header
-        for i in range(disc -1):
+        for i in range(disc +1):
             #th =  .5*np.pi*(pathnum %4) + .5*np.pi*float(i)/disc
             th =  2*np.pi*float(i)/disc
             x = r*np.cos(th) + origin.x # +  r*(float(i)/disc)
@@ -72,10 +72,9 @@ class PathGenerator:
             pos = Point(x,y,z)
             ps = PoseStamped(header, Pose(pos, quat))
             path.poses.append(ps)
-            if i > 1: break
-        
+        path.poses = path.poses #[:3] 
         self.path_pub.publish(path)
-        self.pub.publish(path.poses[0])
+        #self.pub.publish(path.poses[0])
 
 if __name__=="__main__":
     rospy.init_node("path_generator")
@@ -90,7 +89,7 @@ if __name__=="__main__":
     while True:
         i += 1 
         pg.circle(.15, i)
-        rospy.sleep(10)
+        rospy.sleep(3)
     rospy.spin()
 
 """
