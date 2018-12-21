@@ -185,6 +185,83 @@ class PurePursuit:
                 pt_proj = p2
         return dist, nhat, pt_proj, vhat
 
+    def compute_lookahead_segment(self, pt, p1, p2):
+
+        dist, nhat, nearest_pt, vhat = self.pt_to_line_segment_distance(pt, p1, p2)
+
+
+        # compute lookahead point and compute its distance to trajectory
+        lookahead_pt = None
+        dist_to_traj = 0
+        
+        if dist == self.lookahead:
+            
+            # lookahead point is tangent to the circle
+            # we have already computed this point
+            lookahead_pt = nearest_pt
+
+        elif dist < self.lookahead:
+            # find the two points that intersect the circle and line
+
+            # the intersection points are a right triangle
+            # from the center to the projected pt is the perp. distance
+            # the hypotenuse is the lookahead distance
+            # the length we should move down the line is defined by pytheagorean theorem
+            opp = np.sqrt(self.lookahead**2 - dist**2)
+            
+            # v is the direction of the line
+            #intersect1 = nearest_pt + opp*v 
+            #intersect2 = nearest_pt - opp*v 
+            # always use further point
+            lookahead_pt = nearest_pt + opp*vhat
+
+            # make sure lookahead point is defined on segment
+            if not pt_in_segment(p1, p2, lookahead_pt):
+                # lookeahed point is too far, just use end of line segment
+                lookahead_pt = p2
+                dist_from_traj = 0
+
+        else:
+            # project lookahead distance from current point along the normal
+            lookahead_pt = pt + self.lookahead*nhat
+            dist_to_traj = dist - self.lookahead
+        return (dist_to_traj, lookahead_pt), (dist, nearest_pt)
+
+
+    def lookahead_point_on_trajectory(self, point):
+        lookahead_dists = []
+        nearest_dists = []
+
+        #self.control_state_sub.unregister()
+
+        for i in range(len(self.trajectory)):
+            p1 = self.trajectory[i-1, (0,1,2)]
+            p2 = self.trajectory[i, (0,1,2)]
+
+            (dist_to_traj, lookahead_pt), (dist, nearest_pt) = \
+                    self.compute_lookahead_segment(point, p1, p2)
+            #print dist_to_traj, dist
+
+            nearest_pose = np.array(nearest_pt.tolist() + self.trajectory[i,3:].tolist()) 
+            self.nearest_point_pub.publish(make_circle_marker(
+                nearest_pose, 0.01, [1.0,1.0,.0], self.root_frame, self.viz_namespace+"baa" + str(i), 1, 3))
+
+            lookahead_pose = np.array(lookahead_pt.tolist() + self.trajectory[i,3:].tolist()) 
+            self.lookahead_point_pub.publish(make_circle_marker(
+                lookahead_pose, 0.01, [0.0,1.0,1.0], self.root_frame, self.viz_namespace+"baa" + str(i), 1, 3))
+
+            nearest_dists.append ( (dist, nearest_pose, i))
+            lookahead_dists.append( (dist_to_traj, lookahead_pose))
+        #import pdb; pdb.set_trace()
+        lookahead_dists = sorted(lookahead_dists, key=lambda x: x[0])
+        lookahead_pose = lookahead_dists[0][1]
+        return nearest_pose, lookahead_pose
+
+
+        
+
+    """
+
     def lookahead_point_on_trajectory(self, point):
         dists = []
         for i in range(len(self.trajectory)):
@@ -297,8 +374,7 @@ class PurePursuit:
             #    pose, 0.001, [0.0,1.0,1.0], self.root_frame, self.viz_namespace+"aa" + str(j), 1, 3))
 
         return nearest_pt, lookahead_pt
-
-
+    """
 
 
     def nearest_point_on_trajectory(self, point):
@@ -338,17 +414,7 @@ class PurePursuit:
     def stop(self):
         #rospy.loginfo("stop not implemented")
         return
-        print "Stopping"
-        drive_msg_stamped = AckermannDriveStamped()
-        drive_msg = AckermannDrive()
-        drive_msg.speed = 0
-        drive_msg.steering_angle = 0
-        drive_msg.acceleration = 0
-        drive_msg.jerk = 0
-        drive_msg.steering_angle_velocity = 0
-        drive_msg_stamped.drive = drive_msg
-        self.control_pub.publish(drive_msg_stamped)
-
+        
 def make_header(frame_id):
         return Header(0, rospy.Time(0), frame_id)
 
@@ -504,3 +570,4 @@ if __name__=="__main__":
     rospy.init_node("pure_pursuit")
     pf = PurePursuit()
     rospy.spin()
+

@@ -13,11 +13,6 @@ tool_frame = '%s_gripper_tool_frame' % arm
 pos = (.5, -0.18, 0.29)
 quat = (0, 0, 0, 1)
 
-#pub = rospy.Publisher("pose_generated", \
-#pub = rospy.Publisher("%s_cart/command_pose" % arm,\
-#                        PoseStamped, queue_size=1)
-
-
 def stamp_pose((pos,quat), root_frame):
     ps = PoseStamped( 
             Header(0,rospy.Time(0),root_frame),\
@@ -25,10 +20,7 @@ def stamp_pose((pos,quat), root_frame):
             Quaternion(*quat)))
     return ps
 
-#rospy.sleep(1)
 cmd = stamp_pose( (pos,quat), root_frame )
-#pub.publish(cmd)
-
 
 client = SAC("pose_follower", path_follower.msg.GagaPoseAction)
 

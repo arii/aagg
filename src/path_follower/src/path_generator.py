@@ -72,6 +72,7 @@ class PathGenerator:
             pos = Point(x,y,z)
             ps = PoseStamped(header, Pose(pos, quat))
             path.poses.append(ps)
+            if i > 1: break
         
         self.path_pub.publish(path)
         self.pub.publish(path.poses[0])

@@ -20,13 +20,7 @@ from robot_mechanism_controllers.msg import JTCartesianControllerState \
         as ControllerState
 
 """
-TODO:
-
-    include quaternion interpolation
-
-    include quaternion in distance computation
-    
-    if we stop moving but don't reach goal then throw error
+TODO:   Test on robot
 
 
 """
