@@ -4,3 +4,6 @@
 [submodule "src/force_feedback_controller"]
 	path = src/my_controller_pkg
 	url = git@github.mit.edu:goretkin/force_feedback_controller.git
+[submodule "src/lis_pr2_pkg"]
+	path = src/lis_pr2_pkg
+	url = git@github.com:Learning-and-Intelligent-Systems/lis_pr2_pkg.git
